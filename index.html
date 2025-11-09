@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fabula Ultima Character Sheet</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .jrpg-card {
+            background: linear-gradient(145deg, #1f2937, #374151);
+            border: 2px solid #60a5fa;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.25);
+        }
+        .stat-input {
+            width: 100%;
+            padding: 0.5rem;
+            border-radius: 0.375rem;
+            border: 1px solid #4b5563;
+            background-color: #111827;
+            color: #f3f4f6;
+            transition: all 0.2s;
+        }
+        .stat-input:focus {
+            border-color: #60a5fa;
+            box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.5);
+        }
+        /* Debounce indicator */
+        .saving-indicator {
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .saving-indicator.active {
+            opacity: 1;
+        }
+    </style>
+    <!-- Firebase Imports -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, updateDoc, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Set Firebase Log Level to Debug
+        setLogLevel('Debug');
+
+        // Global variables provided by the Canvas environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let db, auth, userId;
+        let isAuthReady = false;
+        let activeBondTab = 0;
+        let saveTimeout = null; // For debouncing saves
+
+        // Default Character Data Structure
+        let character = {
+            name: 'New Hero',
+            pronouns: 'They/Them',
+            level: 5,
+            xp: 0,
+            zenit: 500,
+            fabula_points: 0,
+            attributes: { DEX: 8, INS: 8, MGT: 8, WLP: 8 },
+            derived_stats: {
+                max_hp: 45, current_hp: 45, crisis_hp: 22,
+                max_mp: 45, current_mp: 45,
+                def: 8, mdef: 8, init: 0
+            },
+            traits: { identity: '', theme: '', origin: '' },
+            bonds: Array.from({length: 5}, () => ({ name: '', description: '', score: 1 })),
+            status_effects: { Poisoned: false, Shaken: false, Dazed: false, Weakened: false, Slowed: false },
+            classes: [ { name: 'Warrior', level: 3, skills: [] }, { name: 'Arcanist', level: 2, skills: [] } ],
+            equipment: [],
+            notes: ''
+        };
+
+        // --- Firebase Initialization and Authentication ---
+
+        const initFirebase = async () => {
+            try {
+                if (!firebaseConfig) {
+                    console.error("Firebase configuration is missing. Check your environment variables.");
+                    return;
+                }
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                // Enable offline persistence for better UX
+                try {
+                    await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js").then(mod => mod.enableIndexedDbPersistence(db));
+                } catch (e) {
+                    console.log("Offline persistence not available:", e);
+                }
+                auth = getAuth(app);
+
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userId = user.uid;
+                    } else {
+                        if (initialAuthToken) {
+                            await signInWithCustomToken(auth, initialAuthToken);
+                            userId = auth.currentUser.uid;
+                        } else {
+                            await signInAnonymously(auth);
+                            userId = auth.currentUser.uid;
+                        }
+                    }
+
+                    if (userId) {
+                        isAuthReady = true;
+                        const userIdDisplay = document.getElementById('user-id-display');
+                        if (userIdDisplay) userIdDisplay.textContent = `User ID: ${userId}`;
+                        loadCharacter();
+                    }
+                });
+            } catch (error) {
+                console.error("Firebase initialization failed:", error);
+            }
+        };
+
+        // --- Firestore Data Functions ---
+
+        const getCharacterDocRef = () => {
+            if (!db || !userId) {
+                console.error("Database or User ID not ready.");
+                return null;
+            }
+            const docPath = `artifacts/${appId}/users/${userId}/fabula_ultima_sheet`;
+            return doc(db, docPath, 'main');
+        };
+
+        // Debounced save: waits 1 second after last change
+        const saveCharacter = () => {
+            if (!isAuthReady || !db) return;
+            
+            // Show saving indicator
+            const indicator = document.getElementById('saving-indicator');
+            if (indicator) indicator.classList.add('active');
+
+            clearTimeout(saveTimeout);
+            saveTimeout = setTimeout(async () => {
+                const docRef = getCharacterDocRef();
+                if (docRef) {
+                    try {
+                        await setDoc(docRef, character, { merge: true });
+                        console.log("Character saved successfully.");
+                        if (indicator) indicator.classList.remove('active');
+                    } catch (e) {
+                        console.error("Error saving document: ", e);
+                        if (indicator) indicator.classList.remove('active');
+                    }
+                }
+            }, 1000);
+        };
+
+        const loadCharacter = () => {
+            if (!isAuthReady || !db) return;
+            const docRef = getCharacterDocRef();
+            if (docRef) {
+                onSnapshot(docRef, (doc) => {
+                    if (doc.exists()) {
+                        const savedData = doc.data();
+                        // Deep merge with new defaults
+                        character = { ...character, ...savedData };
+                        console.log("Character loaded successfully.");
+                        calculateDerivedStats();
+                        renderAll();
+                    } else {
+                        console.log("No character found. Saving initial sheet.");
+                        saveCharacter();
+                    }
+                }, (error) => {
+                    console.error("Error listening to document: ", error);
+                });
+            }
+        };
+
+        // --- Core Game Logic ---
+
+        const MAX_DIE_VALUES = { 4: 4, 6: 6, 8: 8, 10: 10, 12: 12 };
+
+        const calculateDerivedStats = () => {
+            const lvl = character.level;
+            const mgtDie = character.attributes.MGT;
+            const wlpDie = character.attributes.WLP;
+            const dexDie = character.attributes.DEX;
+            const insDie = character.attributes.INS;
+
+            const mgtMax = MAX_DIE_VALUES[mgtDie] || 8;
+            const wlpMax = MAX_DIE_VALUES[wlpDie] || 8;
+            const dexMax = MAX_DIE_VALUES[dexDie] || 8;
+            const insMax = MAX_DIE_VALUES[insDie] || 8;
+
+            character.derived_stats.max_hp = lvl + (5 * mgtMax);
+            character.derived_stats.crisis_hp = Math.floor(character.derived_stats.max_hp / 2);
+            character.derived_stats.max_mp = lvl + (5 * wlpMax);
+            character.derived_stats.def = dexMax;
+            character.derived_stats.mdef = insMax;
+            // Initiative: DEX + INS die max values (common house rule)
+            character.derived_stats.init = dexMax + insMax;
+
+            // Clamp current values to max
+            character.derived_stats.current_hp = Math.min(character.derived_stats.current_hp, character.derived_stats.max_hp);
+            character.derived_stats.current_mp = Math.min(character.derived_stats.current_mp, character.derived_stats.max_mp);
+        };
+
+        // --- Optimized DOM Rendering ---
+
+        const dieSizes = [4, 6, 8, 10, 12];
+
+        const createDieSelector = (attributeKey) => {
+            const selector = document.createElement('select');
+            selector.className = 'stat-input mt-1 text-center';
+            selector.dataset.attribute = attributeKey; // Use data attribute for event delegation
+            
+            dieSizes.forEach(size => {
+                const option = document.createElement('option');
+                option.value = size;
+                option.textContent = `d${size}`;
+                selector.appendChild(option);
+            });
+
+            selector.value = character.attributes[attributeKey];
+            return selector;
+        };
+
+        // Centralized event delegation for all inputs
+        const setupGlobalEventListeners = () => {
+            // Attribute die changes
+            document.getElementById('attributes-container').addEventListener('change', (e) => {
+                if (e.target.dataset.attribute) {
+                    character.attributes[e.target.dataset.attribute] = parseInt(e.target.value);
+                    calculateDerivedStats();
+                    saveCharacter();
+                    renderDerivedStats(); // Partial update
+                }
+            });
+
+            // Bond management (event delegation)
+            document.getElementById('bonds-tabs-content').addEventListener('input', (e) => {
+                const index = parseInt(e.target.dataset.index);
+                if (isNaN(index)) return;
+                
+                if (e.target.classList.contains('bond-name')) {
+                    character.bonds[index].name = e.target.value;
+                } else if (e.target.classList.contains('bond-score')) {
+                    character.bonds[index].score = Math.min(5, Math.max(1, parseInt(e.target.value) || 1));
+                } else if (e.target.classList.contains('bond-desc')) {
+                    character.bonds[index].description = e.target.value;
+                }
+                saveCharacter();
+                renderBondsNav(); // Re-render tabs to update names
+            });
+
+            // Status effects
+            document.getElementById('status-effects-container').addEventListener('change', (e) => {
+                if (e.target.dataset.status) {
+                    character.status_effects[e.target.dataset.status] = e.target.checked;
+                    saveCharacter();
+                }
+            });
+
+            // Classes
+            document.getElementById('classes-container').addEventListener('input', (e) => {
+                const index = parseInt(e.target.dataset.index);
+                if (isNaN(index)) return;
+                
+                const field = e.target.dataset.field;
+                if (field === 'level') {
+                    character.classes[index].level = Math.min(5, Math.max(1, parseInt(e.target.value) || 1));
+                    calculateDerivedStats();
+                } else if (field === 'name') {
+                    character.classes[index].name = e.target.value;
+                } else if (field === 'skills') {
+                    character.classes[index].skills = e.target.value.split('\n').map(s => s.trim()).filter(s => s);
+                }
+                saveCharacter();
+            });
+
+            // Equipment
+            document.getElementById('equipment-container').addEventListener('input', (e) => {
+                const index = parseInt(e.target.dataset.index);
+                if (isNaN(index)) return;
+                
+                character.equipment[index] = e.target.value;
+                saveCharacter();
+            });
+
+            // Add/Remove class buttons
+            document.getElementById('add-class-btn').addEventListener('click', () => {
+                if (character.classes.length < 5) { // Max 5 classes
+                    character.classes.push({ name: 'New Class', level: 1, skills: [] });
+                    saveCharacter();
+                    renderClasses();
+                }
+            });
+
+            document.getElementById('remove-class-btn').addEventListener('click', () => {
+                if (character.classes.length > 1) {
+                    character.classes.pop();
+                    saveCharacter();
+                    renderClasses();
+                }
+            });
+
+            // Add equipment button
+            document.getElementById('add-equipment-btn').addEventListener('click', () => {
+                character.equipment.push('');
+                saveCharacter();
+                renderEquipment();
+            });
+        };
+
+        // Partial render functions for performance
+        const renderDerivedStats = () => {
+            document.getElementById('max-hp').textContent = character.derived_stats.max_hp;
+            document.getElementById('crisis-hp').textContent = character.derived_stats.crisis_hp;
+            document.getElementById('max-mp').textContent = character.derived_stats.max_mp;
+            document.getElementById('def').textContent = character.derived_stats.def;
+            document.getElementById('mdef').textContent = character.derived_stats.mdef;
+            document.getElementById('init').textContent = character.derived_stats.init;
+        };
+
+        const renderBondsNav = () => {
+            const bondsTabsNav = document.getElementById('bonds-tabs-nav');
+            bondsTabsNav.innerHTML = '';
+            
+            character.bonds.forEach((bond, index) => {
+                const isActive = index === activeBondTab;
+                const tabName = bond.name.trim() || `Bond ${index + 1}`;
+                
+                const navButton = document.createElement('button');
+                navButton.className = `px-3 py-2 text-sm font-medium transition-colors duration-150 whitespace-nowrap overflow-hidden text-ellipsis ${
+                    isActive ? 'bg-indigo-600 text-white shadow-lg' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+                }`;
+                navButton.textContent = tabName;
+                navButton.onclick = () => {
+                    activeBondTab = index;
+                    renderBondsContent();
+                };
+                bondsTabsNav.appendChild(navButton);
+            });
+        };
+
+        const renderBondsContent = () => {
+            const bondsTabsContent = document.getElementById('bonds-tabs-content');
+            bondsTabsContent.innerHTML = '';
+
+            character.bonds.forEach((bond, index) => {
+                const isActive = index === activeBondTab;
+                const contentDiv = document.createElement('div');
+                contentDiv.className = `p-4 space-y-3 ${isActive ? 'block' : 'hidden'}`;
+                
+                contentDiv.innerHTML = `
+                    <div>
+                        <label class="block text-xs font-semibold text-yellow-300 mb-1">Name / Target</label>
+                        <input type="text" class="bond-name stat-input text-lg font-semibold" data-index="${index}" value="${bond.name}" placeholder="NPC Name or Group">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-yellow-300 mb-1">Bond Score (1-5)</label>
+                        <input type="number" min="1" max="5" class="bond-score stat-input w-20 text-center" data-index="${index}" value="${bond.score}">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-yellow-300 mb-1">Description / Notes</label>
+                        <textarea class="bond-desc stat-input h-28 text-sm" data-index="${index}" placeholder="Why is this bond important?">${bond.description}</textarea>
+                    </div>
+                `;
+                bondsTabsContent.appendChild(contentDiv);
+            });
+        };
+
+        const renderEquipment = () => {
+            const container = document.getElementById('equipment-container');
+            container.innerHTML = '';
+            
+            character.equipment.forEach((item, index) => {
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'flex items-center space-x-2';
+                itemDiv.innerHTML = `
+                    <input type="text" class="stat-input flex-1" data-index="${index}" value="${item}" placeholder="Item name & notes">
+                    <button class="remove-equipment-btn text-red-400 hover:text-red-300 px-2" data-index="${index}">✕</button>
+                `;
+                container.appendChild(itemDiv);
+            });
+
+            // Bind remove buttons
+            document.querySelectorAll('.remove-equipment-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const index = parseInt(e.target.dataset.index);
+                    character.equipment.splice(index, 1);
+                    saveCharacter();
+                    renderEquipment();
+                });
+            });
+        };
+
+        const renderClasses = () => {
+            const classContainer = document.getElementById('classes-container');
+            classContainer.innerHTML = '';
+            
+            character.classes.forEach((c, index) => {
+                const classBlock = document.createElement('div');
+                classBlock.className = 'bg-gray-700 p-3 rounded-lg space-y-2';
+                classBlock.innerHTML = `
+                    <div class="flex items-center space-x-2">
+                        <input type="text" value="${c.name}" data-index="${index}" data-field="name" class="stat-input flex-1 text-lg font-semibold" placeholder="Class Name">
+                        <span class="text-blue-300">Lvl</span>
+                        <input type="number" min="1" max="5" value="${c.level}" data-index="${index}" data-field="level" class="stat-input w-16 text-center">
+                    </div>
+                    <textarea data-index="${index}" data-field="skills" class="stat-input h-20 text-sm" placeholder="Heroic Skills (One per line)">${c.skills.join('\n')}</textarea>
+                `;
+                classContainer.appendChild(classBlock);
+            });
+        };
+
+        const renderStatusEffects = () => {
+            const statusContainer = document.getElementById('status-effects-container');
+            statusContainer.innerHTML = '';
+            
+            Object.keys(character.status_effects).forEach(status => {
+                const isChecked = character.status_effects[status];
+                const label = document.createElement('label');
+                label.className = 'inline-flex items-center space-x-2 text-sm';
+                label.innerHTML = `
+                    <input type="checkbox" data-status="${status}" class="form-checkbox text-red-500 bg-gray-700 border-gray-600 rounded" ${isChecked ? 'checked' : ''}>
+                    <span>${status.toUpperCase()}</span>
+                `;
+                statusContainer.appendChild(label);
+            });
+        };
+
+        const renderAll = () => {
+            // General info
+            const elementsToUpdate = {
+                'char-name': character.name,
+                'char-pronouns': character.pronouns,
+                'char-level': character.level,
+                'char-xp': character.xp,
+                'char-zenit': character.zenit,
+                'char-fp': character.fabula_points,
+                'current-hp': character.derived_stats.current_hp,
+                'current-mp': character.derived_stats.current_mp,
+                'trait-identity': character.traits.identity,
+                'trait-theme': character.traits.theme,
+                'trait-origin': character.traits.origin,
+                'general-notes': character.notes
+            };
+
+            for (const [id, value] of Object.entries(elementsToUpdate)) {
+                const element = document.getElementById(id);
+                if (element) element.value = value;
+            }
+
+            renderDerivedStats();
+            renderBondsNav();
+            renderBondsContent();
+            renderClasses();
+            renderStatusEffects();
+            renderEquipment();
+        };
+
+        // --- Input Handlers (for non-delegated inputs) ---
+        const handleBasicInput = (id, type, path) => {
+            const element = document.getElementById(id);
+            if (!element) return;
+
+            element.addEventListener('input', (e) => {
+                let value = type === 'number' ? parseInt(e.target.value) || 0 : e.target.value;
+                
+                // Navigate nested object paths
+                const keys = path.split('.');
+                let target = character;
+                for (let i = 0; i < keys.length - 1; i++) {
+                    target = target[keys[i]];
+                }
+                target[keys[keys.length - 1]] = value;
+                
+                if (id === 'char-level') calculateDerivedStats();
+                
+                saveCharacter();
+            });
+        };
+
+        window.onload = () => {
+            initFirebase();
+
+            // Setup die selectors in attribute container
+            const attrsContainer = document.getElementById('attributes-container');
+            ['DEX', 'INS', 'MGT', 'WLP'].forEach(key => {
+                const wrapper = document.createElement('div');
+                wrapper.innerHTML = `<label class="block text-sm font-medium">${key} (${key === 'DEX' ? 'Dexterity' : key === 'INS' ? 'Insight' : key === 'MGT' ? 'Might' : 'Willpower'})</label>`;
+                wrapper.appendChild(createDieSelector(key));
+                attrsContainer.appendChild(wrapper);
+            });
+
+            // Setup global event delegation
+            setupGlobalEventListeners();
+
+            // Setup basic inputs
+            handleBasicInput('char-name', 'text', 'name');
+            handleBasicInput('char-pronouns', 'text', 'pronouns');
+            handleBasicInput('char-level', 'number', 'level');
+            handleBasicInput('char-xp', 'number', 'xp');
+            handleBasicInput('char-zenit', 'number', 'zenit');
+            handleBasicInput('char-fp', 'number', 'fabula_points');
+            handleBasicInput('current-hp', 'number', 'derived_stats.current_hp');
+            handleBasicInput('current-mp', 'number', 'derived_stats.current_mp');
+            handleBasicInput('trait-identity', 'text', 'traits.identity');
+            handleBasicInput('trait-theme', 'text', 'traits.theme');
+            handleBasicInput('trait-origin', 'text', 'traits.origin');
+            handleBasicInput('general-notes', 'text', 'notes');
+
+            // Initial render
+            renderAll();
+        };
+
+        // Expose save function for debugging
+        window.saveCharacter = saveCharacter;
+    </script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen p-4 sm:p-8">
+
+    <div class="max-w-4xl mx-auto space-y-8">
+        <header class="text-center pb-4 border-b border-blue-600">
+            <h1 class="text-4xl font-bold text-blue-400 uppercase tracking-widest">Fabula Ultima Hero</h1>
+            <p id="user-id-display" class="text-xs text-gray-400 mt-1">User ID: Loading...</p>
+            <p id="saving-indicator" class="saving-indicator text-xs text-green-400 mt-1">Saving...</p>
+        </header>
+
+        <!-- General Info & Resources -->
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+            <div class="jrpg-card p-3 rounded-lg lg:col-span-2">
+                <label for="char-name" class="block text-xs font-semibold text-blue-400">HERO NAME</label>
+                <input type="text" id="char-name" class="stat-input">
+            </div>
+            <div class="jrpg-card p-3 rounded-lg">
+                <label for="char-pronouns" class="block text-xs font-semibold text-blue-400">PRONOUNS</label>
+                <input type="text" id="char-pronouns" class="stat-input">
+            </div>
+            <div class="jrpg-card p-3 rounded-lg">
+                <label for="char-level" class="block text-xs font-semibold text-blue-400">LEVEL</label>
+                <input type="number" min="1" id="char-level" class="stat-input text-center">
+            </div>
+            <div class="jrpg-card p-3 rounded-lg">
+                <label for="char-xp" class="block text-xs font-semibold text-blue-400">XP</label>
+                <input type="number" min="0" id="char-xp" class="stat-input text-center">
+            </div>
+            <div class="jrpg-card p-3 rounded-lg">
+                <label for="char-zenit" class="block text-xs font-semibold text-blue-400">ZENIT</label>
+                <input type="number" min="0" id="char-zenit" class="stat-input text-center">
+            </div>
+            <div class="jrpg-card p-3 rounded-lg">
+                <label for="char-fp" class="block text-xs font-semibold text-blue-400">FABULA POINTS (FP)</label>
+                <input type="number" min="0" id="char-fp" class="stat-input text-center">
+            </div>
+        </div>
+
+        <!-- Main Content Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+            <!-- COLUMN 1: Attributes & Derived Stats -->
+            <div class="lg:col-span-1 space-y-6">
+
+                <!-- Attributes -->
+                <div class="jrpg-card p-4 rounded-xl space-y-3">
+                    <h2 class="text-xl font-bold text-blue-300 border-b border-gray-600 pb-2">ATTRIBUTES</h2>
+                    <div id="attributes-container" class="grid grid-cols-2 gap-4">
+                        <!-- Die selectors populated by JS -->
+                    </div>
+                </div>
+
+                <!-- HP, MP, DEFENSES -->
+                <div class="jrpg-card p-4 rounded-xl space-y-3">
+                    <h2 class="text-xl font-bold text-red-400 border-b border-gray-600 pb-2">VITALITY & DEFENSES</h2>
+                    <div class="space-y-3">
+                        <div class="bg-gray-700 p-3 rounded-lg">
+                            <label class="block text-xs font-semibold text-red-400 uppercase">Hit Points (HP)</label>
+                            <div class="flex items-center space-x-2">
+                                <input type="number" min="0" id="current-hp" class="stat-input flex-1 text-xl text-center">
+                                <span class="text-lg">/</span>
+                                <span id="max-hp" class="text-xl font-bold text-red-300 w-16 text-center"></span>
+                            </div>
+                            <p class="text-xs text-gray-400 mt-1">Crisis Threshold: <span id="crisis-hp" class="font-bold"></span> HP</p>
+                        </div>
+                        <div class="bg-gray-700 p-3 rounded-lg">
+                            <label class="block text-xs font-semibold text-purple-400 uppercase">Mind Points (MP)</label>
+                            <div class="flex items-center space-x-2">
+                                <input type="number" min="0" id="current-mp" class="stat-input flex-1 text-xl text-center">
+                                <span class="text-lg">/</span>
+                                <span id="max-mp" class="text-xl font-bold text-purple-300 w-16 text-center"></span>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="bg-gray-700 p-3 rounded-lg text-center">
+                                <p class="text-xs font-semibold text-yellow-400 uppercase">DEFENSE (DEF)</p>
+                                <span id="def" class="text-2xl font-extrabold"></span>
+                            </div>
+                            <div class="bg-gray-700 p-3 rounded-lg text-center">
+                                <p class="text-xs font-semibold text-yellow-400 uppercase">MAGIC DEFENSE (M.DEF)</p>
+                                <span id="mdef" class="text-2xl font-extrabold"></span>
+                            </div>
+                        </div>
+                        <div class="bg-gray-700 p-3 rounded-lg text-center">
+                            <p class="text-xs font-semibold text-green-400 uppercase">INITIATIVE (INIT)</p>
+                            <span id="init" class="text-2xl font-extrabold"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Status Effects -->
+                <div class="jrpg-card p-4 rounded-xl">
+                    <h2 class="text-xl font-bold text-red-500 border-b border-gray-600 pb-2 mb-3">STATUS EFFECTS</h2>
+                    <div id="status-effects-container" class="flex flex-wrap gap-x-4 gap-y-2 text-red-200">
+                        <!-- Checkboxes populated by JS -->
+                    </div>
+                </div>
+
+                <!-- Equipment -->
+                <div class="jrpg-card p-4 rounded-xl">
+                    <h2 class="text-xl font-bold text-cyan-400 border-b border-gray-600 pb-2 mb-3">EQUIPMENT</h2>
+                    <div class="flex justify-between items-center mb-3">
+                        <p class="text-sm text-gray-400">Weapons, Armor, & Items</p>
+                        <button id="add-equipment-btn" class="bg-cyan-600 hover:bg-cyan-700 text-white text-sm px-3 py-1 rounded-md transition duration-200 shadow-md">+ Add Item</button>
+                    </div>
+                    <div id="equipment-container" class="space-y-2">
+                        <!-- Equipment items populated by JS -->
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- COLUMN 2: Traits, Bonds, Classes -->
+            <div class="lg:col-span-2 space-y-6">
+                
+                <!-- Traits -->
+                <div class="jrpg-card p-4 rounded-xl space-y-3">
+                    <h2 class="text-xl font-bold text-green-400 border-b border-gray-600 pb-2">TRAITS (FP REROLL)</h2>
+                    <div>
+                        <label for="trait-identity" class="block text-xs font-semibold text-green-300">IDENTITY</label>
+                        <input type="text" id="trait-identity" class="stat-input" placeholder="e.g., Mooncursed Pilgrim Seeking a Cure">
+                    </div>
+                    <div>
+                        <label for="trait-theme" class="block text-xs font-semibold text-green-300">THEME</label>
+                        <input type="text" id="trait-theme" class="stat-input" placeholder="e.g., Hope, Vengeance, Duty">
+                    </div>
+                    <div>
+                        <label for="trait-origin" class="block text-xs font-semibold text-green-300">ORIGIN</label>
+                        <input type="text" id="trait-origin" class="stat-input" placeholder="e.g., A ruined temple, The Technocratic City">
+                    </div>
+                </div>
+
+                <!-- BONDS (TABBED SECTION) -->
+                <div class="jrpg-card p-4 rounded-xl">
+                    <h2 class="text-xl font-bold text-yellow-400 border-b border-gray-600 pb-2 mb-3">BONDS (5 SLOTS)</h2>
+                    <div id="bonds-tabs-nav" class="flex overflow-x-auto border-b border-gray-600 -mt-3 mb-3 pb-1 space-x-1">
+                        <!-- Nav buttons generated by JS -->
+                    </div>
+                    <div id="bonds-tabs-content" class="bg-gray-800 rounded-lg">
+                         <!-- Tab content generated by JS -->
+                    </div>
+                </div>
+
+                <!-- Classes & Skills -->
+                <div class="jrpg-card p-4 rounded-xl space-y-4">
+                    <div class="flex justify-between items-center border-b border-gray-600 pb-2">
+                        <h2 class="text-xl font-bold text-indigo-400">CLASSES & HEROIC SKILLS</h2>
+                        <div>
+                            <button id="add-class-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm px-3 py-1 rounded-md transition duration-200 shadow-md mr-2" title="Add Class">+</button>
+                            <button id="remove-class-btn" class="bg-red-600 hover:bg-red-700 text-white text-sm px-3 py-1 rounded-md transition duration-200 shadow-md" title="Remove Last Class">-</button>
+                        </div>
+                    </div>
+                    <div id="classes-container" class="space-y-4">
+                        <!-- Class blocks populated by JS -->
+                    </div>
+                </div>
+
+                <!-- General Notes -->
+                <div class="jrpg-card p-4 rounded-xl space-y-3">
+                    <h2 class="text-xl font-bold text-gray-400 border-b border-gray-600 pb-2">GENERAL NOTES & LORE</h2>
+                    <textarea id="general-notes" class="stat-input h-32 text-sm" placeholder="Character backstory, quest notes, or any other details."></textarea>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</body>
+</html>
