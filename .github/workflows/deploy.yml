@@ -16,5 +16,5 @@ jobs:
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: '${{ secrets.GITHUB_TOKEN }}'
-          projectId: '${{ secrets.FIREBASE_PROJECT_ID }}'
+          projectId: 'ttrpg-8d65d'
           channelId: ${{ github.event_name == 'push' && 'live' || '' }}
