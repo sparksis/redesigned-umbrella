@@ -1,0 +1,57 @@
+{
+  "character_creation_steps": [
+    "Identity: Choose your character's Identity.",
+    "Theme & Origin: Choose your Theme and Origin.",
+    "Classes: Choose your character's Classes.",
+    "Skills: Distribute 5 levels among your classes and choose skills.",
+    "Attributes: Assign dice (d6, d8, d10) to your four Attributes.",
+    "Stats: Calculate your HP, MP, IP, DEF, M.DEF, and Initiative.",
+    "Equipment: Purchase equipment with 500 Zenit + (2d6 x 10 Z).",
+    "Description: Define your character's appearance, name, and pronouns.",
+    "Fabula Points: Note your starting Fabula Points (3 FP).",
+    "Party: Introduce your character to the party."
+  ],
+  "class_rules": {
+    "starting_level": 5,
+    "level_distribution": "You must distribute 5 levels among your chosen classes.",
+    "free_benefits": "You gain the Free Benefits from a class only for the first level you take in that class.",
+    "skill_level_requirement": "To choose a Skill, your current level in that specific class must be equal to or higher than the Skill's SL requirement."
+  },
+  "classes": {
+    "Loremaster": {
+      "free_benefit": "Permanently increase your maximum Mind Points by 5.",
+      "skills": [
+        { "sl": 1, "name": "Focused", "description": "Once per scene, reroll a failed Attribute Check that doesn't use a Skill." },
+        { "sl": 1, "name": "Trained Memory", "description": "Once per week, \"flash back\" to declare you prepared something, or reinvestigate a past scene." },
+        { "sl": 2, "name": "Knowledge is Power", "description": "When you make an Accuracy Check, you may use your Insight or Willpower die size instead of Dexterity or Might." },
+        { "sl": 3, "name": "Quick Assessment", "description": "At the start of a conflict, spend MP to ask the GM about enemy Traits or Affinities." },
+        { "sl": 3, "name": "Flash of Insight", "description": "When you use a 3.S+ (Critical), you may ask the GM a \"yes or no\" question about the conflict or situation." },
+        { "sl": 4, "name": "Fears of Premonition", "description": "Once per conflict, when an enemy is introduced, you may ask the GM about one of its Traits." }
+      ]
+    },
+    "Wayfarer": {
+      "free_benefit": "Permanently increase your maximum Inventory Points by 2.",
+      "skills": [
+        { "sl": 1, "name": "Well-Traveled", "description": "You reduce the die rolled for your travel rolls by one size (min. d6)." },
+        { "sl": 2, "name": "Treasure Hunter", "description": "When you travel, you make a discovery on a travel roll of SL + 1 or lower." },
+        { "sl": 2, "name": "Tavern Talk", "description": "When you rest at a settlement, you may ask the GM SL \"yes or no\" questions about the location or a person of interest." },
+        { "sl": 2, "name": "Faithful Companion", "description": "You gain a companion creature of your Level." },
+        { "sl": 4, "name": "Resourceful", "description": "Once per day, you may search your belongings to \"find\" any non-magical item with a cost of 50 Z or less." }
+      ]
+    }
+  },
+  "equipment": {
+    "weapons": [
+      { "name": "Tome", "cost": 100, "accuracy": "INS + INS", "damage": "HR + 6 Phys", "category": "Arcane", "hands": "Two" },
+      { "name": "Staff", "cost": 100, "accuracy": "WLP + WLP", "damage": "HR + 6 Phys", "category": "Arcane", "hands": "Two" },
+      { "name": "Steel Dagger", "cost": 150, "accuracy": "DEX + INS +1", "damage": "HR + 4 Phys", "category": "Dagger", "hands": "One" },
+      { "name": "Pistol E", "cost": 250, "accuracy": "DEX + INS", "damage": "HR + 8 Phys", "category": "Firearm", "hands": "One" }
+    ],
+    "armor": [
+      { "name": "Cloth Garb", "cost": 50, "def": 1, "mdef": 0, "init": 0, "category": "Light Armor" },
+      { "name": "Padded Outfit", "cost": 100, "def": 2, "mdef": 0, "init": 0, "category": "Light Armor" },
+      { "name": "Travel Garb", "cost": 100, "def": 1, "mdef": 1, "init": -1, "category": "Light Armor" },
+      { "name": "Light Armor", "cost": 200, "def": 3, "mdef": 0, "init": 0, "category": "Light Armor" }
+    ]
+  }
+}

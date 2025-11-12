@@ -36,6 +36,7 @@
         }
     </style>
     <!-- Firebase Imports -->
+    <script src="characters.js"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
@@ -486,6 +487,26 @@
         window.onload = () => {
             initFirebase();
 
+            // Populate character dropdown
+            const characterSelect = document.getElementById('character-select');
+            for (const key in characters) {
+                const option = document.createElement('option');
+                option.value = key;
+                option.textContent = key;
+                characterSelect.appendChild(option);
+            }
+
+            // Handle character selection
+            characterSelect.addEventListener('change', (e) => {
+                const selectedCharacter = characters[e.target.value];
+                if (selectedCharacter) {
+                    character = JSON.parse(JSON.stringify(selectedCharacter)); // Deep copy
+                    calculateDerivedStats();
+                    renderAll();
+                    saveCharacter();
+                }
+            });
+
             // Setup die selectors in attribute container
             const attrsContainer = document.getElementById('attributes-container');
             ['DEX', 'INS', 'MGT', 'WLP'].forEach(key => {
@@ -524,7 +545,10 @@
 
     <div class="max-w-4xl mx-auto space-y-8">
         <header class="text-center pb-4 border-b border-blue-600">
-            <h1 class="text-4xl font-bold text-blue-400 uppercase tracking-widest">Fabula Ultima Hero</h1>
+            <div class="flex justify-center items-center">
+                <h1 class="text-4xl font-bold text-blue-400 uppercase tracking-widest">Fabula Ultima Hero</h1>
+                <select id="character-select" class="stat-input ml-4"></select>
+            </div>
             <p id="user-id-display" class="text-xs text-gray-400 mt-1">User ID: Loading...</p>
             <p id="saving-indicator" class="saving-indicator text-xs text-green-400 mt-1">Saving...</p>
         </header>
