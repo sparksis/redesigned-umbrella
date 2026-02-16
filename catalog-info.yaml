@@ -1,0 +1,11 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: redesigned-umbrella
+  description: "redesigned-umbrella"
+  annotations:
+    github.com/project-slug: sparksis/redesigned-umbrella
+spec:
+  type: service
+  lifecycle: experimental
+  owner: sparksis
